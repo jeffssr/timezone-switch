@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Timezone Switch</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div id="app" class="container">
+    <!-- Header -->
+    <header class="header">
+      <h1 class="title">时区切换</h1>
+      <label class="toggle" id="masterToggleLabel">
+        <input type="checkbox" id="masterToggle">
+        <span class="toggle-slider"></span>
+      </label>
+    </header>
+
+    <!-- Rule list view -->
+    <section id="ruleListView">
+      <ul id="ruleList" class="rule-list"></ul>
+      <button id="addRuleBtn" class="btn btn-primary btn-full">+ 添加新时区规则</button>
+    </section>
+
+    <!-- Rule edit view (hidden by default) -->
+    <section id="ruleEditView" class="hidden">
+      <header class="header">
+        <button id="backBtn" class="btn btn-link">← 返回</button>
+        <h2 id="editTitle">添加时区规则</h2>
+      </header>
+
+      <!-- Timezone selector -->
+      <div class="form-group">
+        <label class="form-label">时区</label>
+        <div class="search-select" id="tzSearchSelect">
+          <input
+            type="text"
+            id="tzSearchInput"
+            class="search-input"
+            placeholder="搜索时区..."
+            autocomplete="off"
+          >
+          <div class="search-dropdown hidden" id="tzDropdown"></div>
+        </div>
+      </div>
+
+      <!-- Domain input -->
+      <div class="form-group">
+        <label class="form-label">域名</label>
+        <div class="domain-input-row">
+          <input
+            type="text"
+            id="domainInput"
+            class="text-input"
+            placeholder="输入域名后回车添加"
+            autocomplete="off"
+          >
+          <button id="domainAddBtn" class="btn btn-small btn-primary">添加</button>
+        </div>
+        <ul id="domainTagList" class="tag-list"></ul>
+      </div>
+
+      <!-- Actions -->
+      <div class="form-actions">
+        <button id="saveRuleBtn" class="btn btn-primary">保存</button>
+        <button id="cancelRuleBtn" class="btn btn-secondary">取消</button>
+        <button id="deleteRuleBtn" class="btn btn-danger hidden">删除</button>
+      </div>
+    </section>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
