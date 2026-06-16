@@ -31,12 +31,18 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     const offset = computeOffsetForTimezone(activeRule.timezone);
 
     if (injectedTabs.has(tabId)) {
-      chrome.scripting.executeScript({
+      // 页面可能已刷新（ISOLATED 上下文丢失），重新注入
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: ['scripts/content.js']
+      }).catch(() => {});
+      await chrome.scripting.executeScript({
         target: { tabId },
         func: overrideTimeAPIs,
         args: [activeRule.timezone, offset],
         world: 'MAIN'
-      }).catch(() => {});
+      });
+      chrome.tabs.sendMessage(tabId, { type: 'OVERRIDE_APPLIED' }).catch(() => {});
       return;
     }
 
