@@ -123,6 +123,57 @@ function overrideTimeAPIs(targetTimezone, targetOffset) {
   Date.prototype.getSeconds = function () { return _orig_getSeconds.call(new Date(toTargetLocal(this))); };
   Date.prototype.getMilliseconds = function () { return _orig_getMilliseconds.call(new Date(toTargetLocal(this))); };
 
+  /* ---- 2.5. Override Date local setters (inverse of getters) ---- */
+  // 将目标时区的年月日时分秒转回正确 UTC 时间戳，保持 getter/setter 一致性
+  function toUtcFromTarget(ms) {
+    return ms - targetOffset * 60000;
+  }
+
+  function tzParts(d) {
+    var tLocal = d.getTime() + targetOffset * 60000;
+    var u = new Date(tLocal);
+    return {
+      y: u.getUTCFullYear(), m: u.getUTCMonth(), d: u.getUTCDate(),
+      hh: u.getUTCHours(), mm: u.getUTCMinutes(), ss: u.getUTCSeconds(), ms: u.getUTCMilliseconds()
+    };
+  }
+
+  Date.prototype.setFullYear = function (y, m, d) {
+    var p = tzParts(this);
+    this.setTime(toUtcFromTarget(Date.UTC(y, m !== undefined ? m : p.m, d !== undefined ? d : p.d, p.hh, p.mm, p.ss, p.ms)));
+    return this.getTime();
+  };
+  Date.prototype.setMonth = function (m, d) {
+    var p = tzParts(this);
+    this.setTime(toUtcFromTarget(Date.UTC(p.y, m, d !== undefined ? d : p.d, p.hh, p.mm, p.ss, p.ms)));
+    return this.getTime();
+  };
+  Date.prototype.setDate = function (d) {
+    var p = tzParts(this);
+    this.setTime(toUtcFromTarget(Date.UTC(p.y, p.m, d, p.hh, p.mm, p.ss, p.ms)));
+    return this.getTime();
+  };
+  Date.prototype.setHours = function (h, m, s, ms) {
+    var p = tzParts(this);
+    this.setTime(toUtcFromTarget(Date.UTC(p.y, p.m, p.d, h, m !== undefined ? m : p.mm, s !== undefined ? s : p.ss, ms !== undefined ? ms : p.ms)));
+    return this.getTime();
+  };
+  Date.prototype.setMinutes = function (m, s, ms) {
+    var p = tzParts(this);
+    this.setTime(toUtcFromTarget(Date.UTC(p.y, p.m, p.d, p.hh, m, s !== undefined ? s : p.ss, ms !== undefined ? ms : p.ms)));
+    return this.getTime();
+  };
+  Date.prototype.setSeconds = function (s, ms) {
+    var p = tzParts(this);
+    this.setTime(toUtcFromTarget(Date.UTC(p.y, p.m, p.d, p.hh, p.mm, s, ms !== undefined ? ms : p.ms)));
+    return this.getTime();
+  };
+  Date.prototype.setMilliseconds = function (ms) {
+    var p = tzParts(this);
+    this.setTime(toUtcFromTarget(Date.UTC(p.y, p.m, p.d, p.hh, p.mm, p.ss, ms)));
+    return this.getTime();
+  };
+
   /* ---- 3. Override Date toLocale methods ---- */
   const _orig_toLocaleString = Date.prototype.toLocaleString;
   const _orig_toLocaleDateString = Date.prototype.toLocaleDateString;
