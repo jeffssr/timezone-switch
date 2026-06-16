@@ -4,68 +4,105 @@ const injectedTabs = new Set();
 
 // 配置变更时清空注入状态，下次导航会用新配置重新注入
 chrome.storage.onChanged.addListener((changes) => {
-  if (changes[STORAGE_KEY]) injectedTabs.clear();
+  if (changes[STORAGE_KEY]) {
+    console.log('[TZ-SW] config changed, clearing injectedTabs');
+    injectedTabs.clear();
+  }
 });
 
 // 标签页关闭时清理
-chrome.tabs.onRemoved.addListener(tabId => injectedTabs.delete(tabId));
+chrome.tabs.onRemoved.addListener(tabId => {
+  console.log('[TZ-SW] tab removed:', tabId);
+  injectedTabs.delete(tabId);
+});
 
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (changeInfo.status !== 'complete') return;
-  if (!tab.url || !(tab.url.startsWith('http://') || tab.url.startsWith('https://'))) return;
+  console.log('[TZ-SW] tab complete:', tabId, tab.url);
+
+  if (!tab.url || !(tab.url.startsWith('http://') || tab.url.startsWith('https://'))) {
+    console.log('[TZ-SW] skip non-http:', tab.url);
+    return;
+  }
 
   try {
     const result = await chrome.storage.local.get(STORAGE_KEY);
     const config = result[STORAGE_KEY];
-    if (!config || !config.enabled || !config.activeRuleId) return;
+    console.log('[TZ-SW] config loaded:', JSON.stringify({ enabled: config?.enabled, activeRuleId: config?.activeRuleId, rulesCount: config?.rules?.length }));
+
+    if (!config || !config.enabled) {
+      console.log('[TZ-SW] skip: disabled or no config');
+      return;
+    }
+    if (!config.activeRuleId) {
+      console.log('[TZ-SW] skip: no activeRuleId');
+      return;
+    }
 
     const activeRule = config.rules.find(r => r.id === config.activeRuleId);
-    if (!activeRule) return;
+    if (!activeRule) {
+      console.log('[TZ-SW] skip: activeRule not found');
+      return;
+    }
 
     const url = new URL(tab.url);
     const hostname = url.hostname;
+    console.log('[TZ-SW] hostname:', hostname, '| rule domains:', activeRule.domains);
 
-    const domainMatched = activeRule.domains.some(domain =>
-      hostname === domain || hostname.endsWith('.' + domain)
-    );
-    if (!domainMatched) return;
+    const domainMatched = activeRule.domains.some(domain => {
+      const match = hostname === domain || hostname.endsWith('.' + domain);
+      console.log('[TZ-SW]   check:', hostname, 'vs', domain, '→', match);
+      return match;
+    });
+    if (!domainMatched) {
+      console.log('[TZ-SW] skip: domain not matched');
+      return;
+    }
 
     const offset = computeOffsetForTimezone(activeRule.timezone);
+    console.log('[TZ-SW] timezone:', activeRule.timezone, 'offset:', offset);
 
     if (injectedTabs.has(tabId)) {
-      // 已注入过，只更新 MAIN 世界时区参数
+      console.log('[TZ-SW] already injected, updating MAIN world');
       chrome.scripting.executeScript({
         target: { tabId },
         func: overrideTimeAPIs,
         args: [activeRule.timezone, offset],
         world: 'MAIN'
-      }).catch(() => {});
+      }).then(() => console.log('[TZ-SW] MAIN world update OK'))
+        .catch(e => console.error('[TZ-SW] MAIN world update FAILED:', e));
       return;
     }
 
     // 注入 ISOLATED 世界监听器（storage 变更 → reload）
+    console.log('[TZ-SW] injecting content.js (ISOLATED)...');
     await chrome.scripting.executeScript({
       target: { tabId },
       files: ['scripts/content.js']
     });
+    console.log('[TZ-SW] content.js ISOLATED injection OK');
 
     injectedTabs.add(tabId);
 
     // 注入 MAIN 世界时区覆盖（不受页面 CSP 约束）
+    console.log('[TZ-SW] injecting overrideTimeAPIs (MAIN)...');
     await chrome.scripting.executeScript({
       target: { tabId },
       func: overrideTimeAPIs,
       args: [activeRule.timezone, offset],
       world: 'MAIN'
     });
+    console.log('[TZ-SW] overrideTimeAPIs MAIN injection OK');
 
     // 通知 content.js 覆盖已生效
+    console.log('[TZ-SW] notifying content.js...');
     chrome.tabs.sendMessage(tabId, {
       type: 'OVERRIDE_APPLIED'
-    }).catch(() => {});
+    }).then(() => console.log('[TZ-SW] notification sent OK'))
+      .catch(e => console.error('[TZ-SW] notification FAILED:', e));
 
-  } catch (_) {
-    // 标签页可能在注入前已关闭，忽略
+  } catch (err) {
+    console.error('[TZ-SW] ERROR:', err);
   }
 });
 
@@ -79,7 +116,6 @@ function computeOffsetForTimezone(tz) {
     }).formatToParts(now);
 
     const offsetStr = parts.find(p => p.type === 'timeZoneName')?.value || '';
-    // 匹配 "GMT+09:00" / "UTC+9" / "GMT-05:00" 等格式
     const match = offsetStr.match(/(?:GMT|UTC)([+-])(\d{1,2}):?(\d{2})?/);
     if (match) {
       const sign = match[1] === '-' ? -1 : 1;
@@ -95,14 +131,21 @@ function computeOffsetForTimezone(tz) {
 
 // 注入 MAIN 世界的时区覆盖函数（函数引用，不受页面 CSP 约束）
 function overrideTimeAPIs(targetTimezone, targetOffset) {
-  if (window.__tzSwitchApplied) return;
+  console.log('[TZ-MAIN] overrideTimeAPIs called. TZ:', targetTimezone, 'offset:', targetOffset);
+
+  if (window.__tzSwitchApplied) {
+    console.log('[TZ-MAIN] already applied, skipping');
+    return;
+  }
   window.__tzSwitchApplied = true;
+  console.log('[TZ-MAIN] applying patches...');
 
   /* ---- 1. Override Date.prototype.getTimezoneOffset ---- */
   const _orig_getTimezoneOffset = Date.prototype.getTimezoneOffset;
   Date.prototype.getTimezoneOffset = function () {
     return -targetOffset;
   };
+  console.log('[TZ-MAIN] getTimezoneOffset patched, original:', _orig_getTimezoneOffset.call(new Date()), 'new:', -targetOffset);
 
   /* ---- 2. Override Date toLocale methods ---- */
   const _orig_toLocaleString = Date.prototype.toLocaleString;
@@ -118,6 +161,7 @@ function overrideTimeAPIs(targetTimezone, targetOffset) {
   Date.prototype.toLocaleTimeString = function (locales, options) {
     return _orig_toLocaleTimeString.call(this, locales, { ...options, timeZone: targetTimezone });
   };
+  console.log('[TZ-MAIN] Date toLocale methods patched');
 
   /* ---- 3. Override Intl.DateTimeFormat ---- */
   const _orig_DateTimeFormat = Intl.DateTimeFormat;
@@ -133,4 +177,6 @@ function overrideTimeAPIs(targetTimezone, targetOffset) {
     writable: true,
     configurable: true
   });
+  console.log('[TZ-MAIN] Intl.DateTimeFormat patched');
+  console.log('[TZ-MAIN] ALL PATCHES APPLIED SUCCESSFULLY');
 }
