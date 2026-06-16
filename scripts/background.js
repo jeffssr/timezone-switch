@@ -163,8 +163,56 @@ function overrideTimeAPIs(targetTimezone, targetOffset) {
   };
   console.log('[TZ-MAIN] Date toLocale methods patched');
 
-  /* ---- 3. Override Intl.DateTimeFormat ---- */
-  const _orig_DateTimeFormat = Intl.DateTimeFormat;
+  /* ---- 3. Override Date.prototype.toString / toTimeString / toDateString ---- */
+  const _orig_toString = Date.prototype.toString;
+  const _orig_toTimeString = Date.prototype.toTimeString;
+  const _orig_toDateString = Date.prototype.toDateString;
+
+  // 缓存格式化器（每天重建一次应对夏令时变化）
+  function getFmt() {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: targetTimezone, hour12: false,
+      weekday: 'short', year: 'numeric', month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      timeZoneName: 'long'
+    });
+  }
+
+  Date.prototype.toString = function () {
+    var fmt = getFmt();
+    var parts = fmt.formatToParts(this);
+    var get = function (t) { return (parts.find(function (p) { return p.type === t; }) || {}).value || ''; };
+    var absOff = Math.abs(targetOffset);
+    var sign = targetOffset >= 0 ? '+' : '-';
+    var offH = String(Math.floor(absOff / 60)).padStart(2, '0');
+    var offM = String(absOff % 60).padStart(2, '0');
+    return get('weekday') + ' ' + get('month') + ' ' + get('day') + ' ' +
+           get('year') + ' ' + get('hour') + ':' + get('minute') + ':' + get('second') +
+           ' GMT' + sign + offH + offM + ' (' + get('timeZoneName') + ')';
+  };
+
+  Date.prototype.toTimeString = function () {
+    var fmt = getFmt();
+    var parts = fmt.formatToParts(this);
+    var get = function (t) { return (parts.find(function (p) { return p.type === t; }) || {}).value || ''; };
+    var absOff = Math.abs(targetOffset);
+    var sign = targetOffset >= 0 ? '+' : '-';
+    var offH = String(Math.floor(absOff / 60)).padStart(2, '0');
+    var offM = String(absOff % 60).padStart(2, '0');
+    return get('hour') + ':' + get('minute') + ':' + get('second') +
+           ' GMT' + sign + offH + offM + ' (' + get('timeZoneName') + ')';
+  };
+
+  Date.prototype.toDateString = function () {
+    var fmt = getFmt();
+    var parts = fmt.formatToParts(this);
+    var get = function (t) { return (parts.find(function (p) { return p.type === t; }) || {}).value || ''; };
+    return get('weekday') + ' ' + get('month') + ' ' + get('day') + ' ' + get('year');
+  };
+  console.log('[TZ-MAIN] Date toString/toTimeString/toDateString patched');
+
+  /* ---- 4. Override Intl.DateTimeFormat ---- */
+  var _orig_DateTimeFormat = Intl.DateTimeFormat;
 
   function PatchedDateTimeFormat(locales, options) {
     return new _orig_DateTimeFormat(locales, { ...options, timeZone: targetTimezone });
@@ -179,4 +227,5 @@ function overrideTimeAPIs(targetTimezone, targetOffset) {
   });
   console.log('[TZ-MAIN] Intl.DateTimeFormat patched');
   console.log('[TZ-MAIN] ALL PATCHES APPLIED SUCCESSFULLY');
+  console.log('[TZ-MAIN] Verify: toString:', new Date().toString());
 }
