@@ -231,8 +231,8 @@ function switchToListView() {
 }
 
 function saveRule() {
-  if (!tzSelected) return;
-  if (domainList.length === 0) return;
+  if (!tzSelected) { alert('请选择时区'); return; }
+  if (domainList.length === 0) { alert('请至少添加一个域名'); return; }
 
   if (editingRule) {
     editingRule.timezone = tzSelected.value;

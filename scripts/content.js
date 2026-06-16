@@ -3,9 +3,15 @@
 
 let _overrideApplied = false;
 
-// 配置变更时自动刷新，恢复正确时区状态
+// 配置变更时自动刷新，恢复正确时区状态（仅 enabled/activeRuleId 变化才 reload）
 chrome.storage.onChanged.addListener((changes) => {
-  if (changes.timezoneConfig && _overrideApplied) {
+  const c = changes.timezoneConfig;
+  if (!c || !_overrideApplied) return;
+  const oldEnabled = c.oldValue?.enabled;
+  const newEnabled = c.newValue?.enabled;
+  const oldActive = c.oldValue?.activeRuleId;
+  const newActive = c.newValue?.activeRuleId;
+  if (oldEnabled !== newEnabled || oldActive !== newActive) {
     location.reload();
   }
 });
@@ -51,6 +57,7 @@ function injectScript(targetTimezone, targetOffset) {
       function PatchedDateTimeFormat(locales, options) {
         return new _orig_DateTimeFormat(locales, { ...options, timeZone: TARGET_TZ });
       }
+      PatchedDateTimeFormat.prototype = _orig_DateTimeFormat.prototype;
       PatchedDateTimeFormat.supportedLocalesOf = _orig_DateTimeFormat.supportedLocalesOf.bind(_orig_DateTimeFormat);
 
       Object.defineProperty(Intl, 'DateTimeFormat', {
