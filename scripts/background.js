@@ -147,6 +147,33 @@ function overrideTimeAPIs(targetTimezone, targetOffset) {
   };
   console.log('[TZ-MAIN] getTimezoneOffset patched, original:', _orig_getTimezoneOffset.call(new Date()), 'new:', -targetOffset);
 
+  /* ---- 1.5. Override Date local getters ---- */
+  // 基础 getter 直接用系统时区数据库计算本地时间，不走 getTimezoneOffset
+  // 必须将 UTC 时间戳偏移后再调用原始 getter，使系统时区解释为目标时区
+  var _orig_getFullYear = Date.prototype.getFullYear;
+  var _orig_getMonth = Date.prototype.getMonth;
+  var _orig_getDate = Date.prototype.getDate;
+  var _orig_getDay = Date.prototype.getDay;
+  var _orig_getHours = Date.prototype.getHours;
+  var _orig_getMinutes = Date.prototype.getMinutes;
+  var _orig_getSeconds = Date.prototype.getSeconds;
+  var _orig_getMilliseconds = Date.prototype.getMilliseconds;
+
+  function toTargetLocal(d) {
+    var sysEast = -_orig_getTimezoneOffset.call(d);
+    return d.getTime() + (targetOffset - sysEast) * 60000;
+  }
+
+  Date.prototype.getFullYear = function () { return _orig_getFullYear.call(new Date(toTargetLocal(this))); };
+  Date.prototype.getMonth = function () { return _orig_getMonth.call(new Date(toTargetLocal(this))); };
+  Date.prototype.getDate = function () { return _orig_getDate.call(new Date(toTargetLocal(this))); };
+  Date.prototype.getDay = function () { return _orig_getDay.call(new Date(toTargetLocal(this))); };
+  Date.prototype.getHours = function () { return _orig_getHours.call(new Date(toTargetLocal(this))); };
+  Date.prototype.getMinutes = function () { return _orig_getMinutes.call(new Date(toTargetLocal(this))); };
+  Date.prototype.getSeconds = function () { return _orig_getSeconds.call(new Date(toTargetLocal(this))); };
+  Date.prototype.getMilliseconds = function () { return _orig_getMilliseconds.call(new Date(toTargetLocal(this))); };
+  console.log('[TZ-MAIN] Date local getters patched (getFullYear..getMilliseconds)');
+
   /* ---- 2. Override Date toLocale methods ---- */
   const _orig_toLocaleString = Date.prototype.toLocaleString;
   const _orig_toLocaleDateString = Date.prototype.toLocaleDateString;
@@ -227,5 +254,5 @@ function overrideTimeAPIs(targetTimezone, targetOffset) {
   });
   console.log('[TZ-MAIN] Intl.DateTimeFormat patched');
   console.log('[TZ-MAIN] ALL PATCHES APPLIED SUCCESSFULLY');
-  console.log('[TZ-MAIN] Verify: toString:', new Date().toString());
+  console.log('[TZ-MAIN] Verify toString:', new Date().toString(), 'getHours:', new Date().getHours());
 }
