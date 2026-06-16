@@ -33,15 +33,17 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     const offset = computeOffsetForTimezone(activeRule.timezone);
 
     if (injectedTabs.has(tabId)) {
-      // 已注入过，只更新时区参数
-      chrome.tabs.sendMessage(tabId, {
-        type: 'OVERRIDE_TIMEZONE',
-        timezone: activeRule.timezone,
-        offset
+      // 已注入过，只更新 MAIN 世界时区参数
+      chrome.scripting.executeScript({
+        target: { tabId },
+        func: overrideTimeAPIs,
+        args: [activeRule.timezone, offset],
+        world: 'MAIN'
       }).catch(() => {});
       return;
     }
 
+    // 注入 ISOLATED 世界监听器（storage 变更 → reload）
     await chrome.scripting.executeScript({
       target: { tabId },
       files: ['scripts/content.js']
@@ -49,11 +51,18 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
     injectedTabs.add(tabId);
 
-    chrome.tabs.sendMessage(tabId, {
-      type: 'OVERRIDE_TIMEZONE',
-      timezone: activeRule.timezone,
-      offset
+    // 注入 MAIN 世界时区覆盖（不受页面 CSP 约束）
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: overrideTimeAPIs,
+      args: [activeRule.timezone, offset],
+      world: 'MAIN'
     });
+
+    // 通知 content.js 覆盖已生效
+    chrome.tabs.sendMessage(tabId, {
+      type: 'OVERRIDE_APPLIED'
+    }).catch(() => {});
 
   } catch (_) {
     // 标签页可能在注入前已关闭，忽略
@@ -82,4 +91,46 @@ function computeOffsetForTimezone(tz) {
   } catch {
     return 0;
   }
+}
+
+// 注入 MAIN 世界的时区覆盖函数（函数引用，不受页面 CSP 约束）
+function overrideTimeAPIs(targetTimezone, targetOffset) {
+  if (window.__tzSwitchApplied) return;
+  window.__tzSwitchApplied = true;
+
+  /* ---- 1. Override Date.prototype.getTimezoneOffset ---- */
+  const _orig_getTimezoneOffset = Date.prototype.getTimezoneOffset;
+  Date.prototype.getTimezoneOffset = function () {
+    return -targetOffset;
+  };
+
+  /* ---- 2. Override Date toLocale methods ---- */
+  const _orig_toLocaleString = Date.prototype.toLocaleString;
+  const _orig_toLocaleDateString = Date.prototype.toLocaleDateString;
+  const _orig_toLocaleTimeString = Date.prototype.toLocaleTimeString;
+
+  Date.prototype.toLocaleString = function (locales, options) {
+    return _orig_toLocaleString.call(this, locales, { ...options, timeZone: targetTimezone });
+  };
+  Date.prototype.toLocaleDateString = function (locales, options) {
+    return _orig_toLocaleDateString.call(this, locales, { ...options, timeZone: targetTimezone });
+  };
+  Date.prototype.toLocaleTimeString = function (locales, options) {
+    return _orig_toLocaleTimeString.call(this, locales, { ...options, timeZone: targetTimezone });
+  };
+
+  /* ---- 3. Override Intl.DateTimeFormat ---- */
+  const _orig_DateTimeFormat = Intl.DateTimeFormat;
+
+  function PatchedDateTimeFormat(locales, options) {
+    return new _orig_DateTimeFormat(locales, { ...options, timeZone: targetTimezone });
+  }
+  PatchedDateTimeFormat.prototype = _orig_DateTimeFormat.prototype;
+  PatchedDateTimeFormat.supportedLocalesOf = _orig_DateTimeFormat.supportedLocalesOf.bind(_orig_DateTimeFormat);
+
+  Object.defineProperty(Intl, 'DateTimeFormat', {
+    value: PatchedDateTimeFormat,
+    writable: true,
+    configurable: true
+  });
 }
