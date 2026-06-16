@@ -1,5 +1,14 @@
 // Service Worker — 监听标签页导航，按域名匹配注入时区覆盖
 const STORAGE_KEY = 'timezoneConfig';
+const injectedTabs = new Set();
+
+// 配置变更时清空注入状态，下次导航会用新配置重新注入
+chrome.storage.onChanged.addListener((changes) => {
+  if (changes[STORAGE_KEY]) injectedTabs.clear();
+});
+
+// 标签页关闭时清理
+chrome.tabs.onRemoved.addListener(tabId => injectedTabs.delete(tabId));
 
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (changeInfo.status !== 'complete') return;
@@ -23,13 +32,23 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
     const offset = computeOffsetForTimezone(activeRule.timezone);
 
-    // 先注入监听器（content script）
+    if (injectedTabs.has(tabId)) {
+      // 已注入过，只更新时区参数
+      chrome.tabs.sendMessage(tabId, {
+        type: 'OVERRIDE_TIMEZONE',
+        timezone: activeRule.timezone,
+        offset
+      }).catch(() => {});
+      return;
+    }
+
     await chrome.scripting.executeScript({
       target: { tabId },
       files: ['scripts/content.js']
     });
 
-    // 发送时区参数
+    injectedTabs.add(tabId);
+
     chrome.tabs.sendMessage(tabId, {
       type: 'OVERRIDE_TIMEZONE',
       timezone: activeRule.timezone,
@@ -41,60 +60,26 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   }
 });
 
-// 计算指定 IANA 时区当前 UTC 偏移（分钟）
+// 计算指定 IANA 时区相对于 UTC 的分钟偏移（正值 = 东区）
 function computeOffsetForTimezone(tz) {
   try {
     const now = new Date();
-    const utcTimeVal = now.getTime() + (now.getTimezoneOffset() * 60000);
-    const targetTime = new Date(utcTimeVal + (computeRawOffset(tz, now) * 60000));
-    return -targetTime.getTimezoneOffset();
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      timeZoneName: 'shortOffset'
+    }).formatToParts(now);
+
+    const offsetStr = parts.find(p => p.type === 'timeZoneName')?.value || '';
+    // 匹配 "GMT+09:00" / "UTC+9" / "GMT-05:00" 等格式
+    const match = offsetStr.match(/(?:GMT|UTC)([+-])(\d{1,2}):?(\d{2})?/);
+    if (match) {
+      const sign = match[1] === '-' ? -1 : 1;
+      const hours = parseInt(match[2], 10);
+      const minutes = parseInt(match[3] || '0', 10);
+      return sign * (hours * 60 + minutes);
+    }
+    return 0;
   } catch {
-    // 后备：用粗略估算
-    return estimateOffset(tz);
+    return 0;
   }
-}
-
-function computeRawOffset(tz, now) {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    hour12: false,
-    year: 'numeric',
-    month: 'numeric',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: 'numeric',
-    second: 'numeric'
-  }).formatToParts(now);
-
-  const get = (type) => parseInt(parts.find(p => p.type === type)?.value || '0', 10);
-  const utcYear = now.getUTCFullYear();
-  const utcMonth = now.getUTCMonth() + 1;
-  const utcDay = now.getUTCDate();
-  const utcHour = now.getUTCHours();
-  const utcMinute = now.getUTCMinutes();
-  const utcSecond = now.getUTCSeconds();
-
-  const targetDate = new Date(
-    get('year'), get('month') - 1, get('day'),
-    get('hour'), get('minute'), get('second')
-  );
-  const utcDate = new Date(Date.UTC(utcYear, utcMonth - 1, utcDay, utcHour, utcMinute, utcSecond));
-
-  return (targetDate.getTime() - utcDate.getTime()) / 60000;
-}
-
-function estimateOffset(tz) {
-  const testDate = new Date();
-  const shortOffset = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    timeZoneName: 'shortOffset'
-  }).formatToParts(testDate);
-
-  const offsetStr = shortOffset.find(p => p.type === 'timeZoneName')?.value || '';
-  const match = offsetStr.match(/GMT([+-]\d{2}):?(\d{2})/);
-  if (match) {
-    const sign = match[1][0] === '-' ? -1 : 1;
-    return sign * (Math.abs(parseInt(match[1], 10)) * 60 + parseInt(match[2], 10));
-  }
-  return 0;
 }

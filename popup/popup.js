@@ -127,7 +127,8 @@ function renderDomainTags() {
   domainList.forEach(domain => {
     const li = document.createElement('li');
     li.className = 'tag-item';
-    li.innerHTML = `${domain} <button class="tag-remove" data-domain="${domain}">&times;</button>`;
+    const escaped = escapeHtml(domain);
+    li.innerHTML = `${escaped} <button class="tag-remove">&times;</button>`;
     li.querySelector('.tag-remove').addEventListener('click', () => removeDomain(domain));
     domainTagList.appendChild(li);
   });
@@ -175,7 +176,7 @@ function renderRuleList() {
 
     li.querySelector('.rule-delete').addEventListener('click', (e) => {
       e.stopPropagation();
-      deleteRule(rule.id);
+      if (confirm(`确定删除规则「${rule.timezoneLabel}」？`)) deleteRule(rule.id);
     });
 
     ruleList.appendChild(li);
@@ -239,7 +240,7 @@ function saveRule() {
     editingRule.domains = [...domainList];
   } else {
     config.rules.push({
-      id: 'r' + Date.now(),
+      id: 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
       timezone: tzSelected.value,
       timezoneLabel: tzSelected.label,
       domains: [...domainList]
@@ -256,8 +257,10 @@ cancelRuleBtn.addEventListener('click', switchToListView);
 saveRuleBtn.addEventListener('click', saveRule);
 deleteRuleBtn.addEventListener('click', () => {
   if (editingRule) {
-    deleteRule(editingRule.id);
-    switchToListView();
+    if (confirm(`确定删除规则「${editingRule.timezoneLabel}」？`)) {
+      deleteRule(editingRule.id);
+      switchToListView();
+    }
   }
 });
 

@@ -1,10 +1,20 @@
 // Content script — 运行在 ISOLATED 世界
 // 监听 background 消息，将时区覆盖代码注入到页面 MAIN 世界
 
+let _overrideApplied = false;
+
+// 配置变更时自动刷新，恢复正确时区状态
+chrome.storage.onChanged.addListener((changes) => {
+  if (changes.timezoneConfig && _overrideApplied) {
+    location.reload();
+  }
+});
+
 chrome.runtime.onMessage.addListener((message, _sender, _sendResponse) => {
   if (message.type === 'OVERRIDE_TIMEZONE') {
     const { timezone, offset } = message;
     injectScript(timezone, offset);
+    _overrideApplied = true;
   }
 });
 
@@ -37,24 +47,10 @@ function injectScript(targetTimezone, targetOffset) {
 
       /* ---- 3. Override Intl.DateTimeFormat ---- */
       const _orig_DateTimeFormat = Intl.DateTimeFormat;
-      const _orig_format = Intl.DateTimeFormat.prototype.format;
-      const _orig_formatToParts = Intl.DateTimeFormat.prototype.formatToParts;
-      const _orig_resolvedOptions = Intl.DateTimeFormat.prototype.resolvedOptions;
 
       function PatchedDateTimeFormat(locales, options) {
         return new _orig_DateTimeFormat(locales, { ...options, timeZone: TARGET_TZ });
       }
-
-      PatchedDateTimeFormat.prototype.format = function patchedFormat(date) {
-        return _orig_format.call(this, date);
-      };
-      PatchedDateTimeFormat.prototype.formatToParts = function patchedFormatToParts(date) {
-        return _orig_formatToParts.call(this, date);
-      };
-      PatchedDateTimeFormat.prototype.resolvedOptions = function patchedResolvedOptions() {
-        const opts = _orig_resolvedOptions.call(this);
-        return { ...opts, timeZone: TARGET_TZ };
-      };
       PatchedDateTimeFormat.supportedLocalesOf = _orig_DateTimeFormat.supportedLocalesOf.bind(_orig_DateTimeFormat);
 
       Object.defineProperty(Intl, 'DateTimeFormat', {
