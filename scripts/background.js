@@ -100,6 +100,76 @@ function overrideTimeAPIs(targetTimezone, targetOffset) {
   if (window.__tzSwitchApplied) return;
   window.__tzSwitchApplied = true;
 
+  /* ---- 0. Override Date constructor ---- */
+  // 将无时区字符串和多参数构造按目标时区解释，消除 getter 双重偏移
+  const _orig_Date = Date;
+  const _orig_Date_UTC = Date.UTC;
+  const _orig_Date_parse = Date.parse;
+  const _orig_Date_now = Date.now;
+
+  function PatchedDate() {
+    // Date() 无 new 调用 → 返回字符串
+    if (!new.target) return (new PatchedDate()).toString();
+
+    var len = arguments.length;
+    var a = arguments;
+
+    // 多参数：new Date(year, month, day, hours, mins, secs, ms)
+    if (len >= 2) {
+      var y = a[0];
+      var mo = a[1];
+      var d = a[2] !== undefined ? a[2] : 1;
+      var h = a[3] || 0;
+      var mi = a[4] || 0;
+      var s = a[5] || 0;
+      var ms = a[6] || 0;
+      return new _orig_Date(_orig_Date_UTC(y, mo, d, h, mi, s, ms) - targetOffset * 60000);
+    }
+
+    // 纯日期字符串：new Date('MM/DD/YYYY') 或 new Date('YYYY-MM-DD')
+    if (len === 1 && typeof a[0] === 'string') {
+      var str = a[0];
+
+      var mmddyyyy = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+      if (mmddyyyy) {
+        return new _orig_Date(_orig_Date_UTC(
+          parseInt(mmddyyyy[3], 10),
+          parseInt(mmddyyyy[1], 10) - 1,
+          parseInt(mmddyyyy[2], 10),
+          0, 0, 0, 0
+        ) - targetOffset * 60000);
+      }
+
+      var iso = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+      if (iso) {
+        return new _orig_Date(_orig_Date_UTC(
+          parseInt(iso[1], 10),
+          parseInt(iso[2], 10) - 1,
+          parseInt(iso[3], 10),
+          0, 0, 0, 0
+        ) - targetOffset * 60000);
+      }
+
+      // 带时间或时区的字符串 → 原样放行
+      return new _orig_Date(str);
+    }
+
+    // new Date() 或 new Date(timestamp)
+    if (len === 0) return new _orig_Date();
+    return new _orig_Date(a[0]);
+  }
+
+  PatchedDate.now = _orig_Date_now;
+  PatchedDate.UTC = _orig_Date_UTC;
+  PatchedDate.parse = _orig_Date_parse;
+  PatchedDate.prototype = _orig_Date.prototype;
+
+  Object.defineProperty(window, 'Date', {
+    value: PatchedDate,
+    writable: true,
+    configurable: true
+  });
+
   /* ---- 1. Override Date.prototype.getTimezoneOffset ---- */
   const _orig_getTimezoneOffset = Date.prototype.getTimezoneOffset;
   Date.prototype.getTimezoneOffset = function () {
