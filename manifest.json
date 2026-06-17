@@ -3,7 +3,7 @@
   "name": "Timezone Switch",
   "version": "1.0.0",
   "description": "按域名切换浏览器时区",
-  "permissions": ["storage", "scripting", "tabs"],
+  "permissions": ["storage", "scripting", "tabs", "webNavigation"],
   "host_permissions": ["<all_urls>"],
   "action": {
     "default_popup": "popup/popup.html",
