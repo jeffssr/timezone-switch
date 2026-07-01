@@ -107,6 +107,9 @@ function overrideTimeAPIs(targetTimezone, targetOffset) {
   const _orig_Date_parse = Date.parse;
   const _orig_Date_now = Date.now;
 
+  // 标记"真实数据" Date 实例：含具体时间的字符串构造，不应做时区偏移
+  var _realDataDates = new WeakSet();
+
   function PatchedDate() {
     // Date() 无 new 调用 → 返回字符串
     if (!new.target) return (new PatchedDate()).toString();
@@ -150,8 +153,10 @@ function overrideTimeAPIs(targetTimezone, targetOffset) {
         ) - targetOffset * 60000);
       }
 
-      // 带时间或时区的字符串 → 原样放行
-      return new _orig_Date(str);
+      // 带时间或时区的字符串 → 真实数据，标记后不做时区偏移
+      var _d = new _orig_Date(str);
+      _realDataDates.add(_d);
+      return _d;
     }
 
     // new Date() 或 new Date(timestamp)
@@ -173,6 +178,7 @@ function overrideTimeAPIs(targetTimezone, targetOffset) {
   /* ---- 1. Override Date.prototype.getTimezoneOffset ---- */
   const _orig_getTimezoneOffset = Date.prototype.getTimezoneOffset;
   Date.prototype.getTimezoneOffset = function () {
+    if (_realDataDates.has(this)) return _orig_getTimezoneOffset.call(this);
     return -targetOffset;
   };
 
@@ -191,14 +197,14 @@ function overrideTimeAPIs(targetTimezone, targetOffset) {
     return d.getTime() + (targetOffset - sysEast) * 60000;
   }
 
-  Date.prototype.getFullYear = function () { return _orig_getFullYear.call(new Date(toTargetLocal(this))); };
-  Date.prototype.getMonth = function () { return _orig_getMonth.call(new Date(toTargetLocal(this))); };
-  Date.prototype.getDate = function () { return _orig_getDate.call(new Date(toTargetLocal(this))); };
-  Date.prototype.getDay = function () { return _orig_getDay.call(new Date(toTargetLocal(this))); };
-  Date.prototype.getHours = function () { return _orig_getHours.call(new Date(toTargetLocal(this))); };
-  Date.prototype.getMinutes = function () { return _orig_getMinutes.call(new Date(toTargetLocal(this))); };
-  Date.prototype.getSeconds = function () { return _orig_getSeconds.call(new Date(toTargetLocal(this))); };
-  Date.prototype.getMilliseconds = function () { return _orig_getMilliseconds.call(new Date(toTargetLocal(this))); };
+  Date.prototype.getFullYear = function () { if (_realDataDates.has(this)) return _orig_getFullYear.call(this); return _orig_getFullYear.call(new Date(toTargetLocal(this))); };
+  Date.prototype.getMonth = function () { if (_realDataDates.has(this)) return _orig_getMonth.call(this); return _orig_getMonth.call(new Date(toTargetLocal(this))); };
+  Date.prototype.getDate = function () { if (_realDataDates.has(this)) return _orig_getDate.call(this); return _orig_getDate.call(new Date(toTargetLocal(this))); };
+  Date.prototype.getDay = function () { if (_realDataDates.has(this)) return _orig_getDay.call(this); return _orig_getDay.call(new Date(toTargetLocal(this))); };
+  Date.prototype.getHours = function () { if (_realDataDates.has(this)) return _orig_getHours.call(this); return _orig_getHours.call(new Date(toTargetLocal(this))); };
+  Date.prototype.getMinutes = function () { if (_realDataDates.has(this)) return _orig_getMinutes.call(this); return _orig_getMinutes.call(new Date(toTargetLocal(this))); };
+  Date.prototype.getSeconds = function () { if (_realDataDates.has(this)) return _orig_getSeconds.call(this); return _orig_getSeconds.call(new Date(toTargetLocal(this))); };
+  Date.prototype.getMilliseconds = function () { if (_realDataDates.has(this)) return _orig_getMilliseconds.call(this); return _orig_getMilliseconds.call(new Date(toTargetLocal(this))); };
 
   /* ---- 2.5. Override Date local setters ---- */
   function toUtcFromTarget(ms) {
@@ -256,16 +262,23 @@ function overrideTimeAPIs(targetTimezone, targetOffset) {
   const _orig_toLocaleTimeString = Date.prototype.toLocaleTimeString;
 
   Date.prototype.toLocaleString = function (locales, options) {
+    if (_realDataDates.has(this)) return _orig_toLocaleString.call(this, locales, options);
     return _orig_toLocaleString.call(this, locales, { ...options, timeZone: targetTimezone });
   };
   Date.prototype.toLocaleDateString = function (locales, options) {
+    if (_realDataDates.has(this)) return _orig_toLocaleDateString.call(this, locales, options);
     return _orig_toLocaleDateString.call(this, locales, { ...options, timeZone: targetTimezone });
   };
   Date.prototype.toLocaleTimeString = function (locales, options) {
+    if (_realDataDates.has(this)) return _orig_toLocaleTimeString.call(this, locales, options);
     return _orig_toLocaleTimeString.call(this, locales, { ...options, timeZone: targetTimezone });
   };
 
   /* ---- 4. Override Date.prototype.toString / toTimeString / toDateString ---- */
+  const _orig_toString = Date.prototype.toString;
+  const _orig_toTimeString = Date.prototype.toTimeString;
+  const _orig_toDateString = Date.prototype.toDateString;
+
   const absOff = Math.abs(targetOffset);
   const _sign = targetOffset >= 0 ? '+' : '-';
   const _offH = String(Math.floor(absOff / 60)).padStart(2, '0');
@@ -281,6 +294,7 @@ function overrideTimeAPIs(targetTimezone, targetOffset) {
   }
 
   Date.prototype.toString = function () {
+    if (_realDataDates.has(this)) return _orig_toString.call(this);
     const fmt = getFmt();
     const parts = fmt.formatToParts(this);
     const get = function (t) { return (parts.find(function (p) { return p.type === t; }) || {}).value || ''; };
@@ -290,6 +304,7 @@ function overrideTimeAPIs(targetTimezone, targetOffset) {
   };
 
   Date.prototype.toTimeString = function () {
+    if (_realDataDates.has(this)) return _orig_toTimeString.call(this);
     const fmt = getFmt();
     const parts = fmt.formatToParts(this);
     const get = function (t) { return (parts.find(function (p) { return p.type === t; }) || {}).value || ''; };
@@ -298,6 +313,7 @@ function overrideTimeAPIs(targetTimezone, targetOffset) {
   };
 
   Date.prototype.toDateString = function () {
+    if (_realDataDates.has(this)) return _orig_toDateString.call(this);
     const fmt = getFmt();
     const parts = fmt.formatToParts(this);
     const get = function (t) { return (parts.find(function (p) { return p.type === t; }) || {}).value || ''; };
@@ -318,4 +334,18 @@ function overrideTimeAPIs(targetTimezone, targetOffset) {
     writable: true,
     configurable: true
   });
+
+  // 覆盖 format：真实数据 Date 不附加目标时区
+  var _orig_format = _orig_DateTimeFormat.prototype.format;
+  _orig_DateTimeFormat.prototype.format = function (date) {
+    if (date instanceof Date && _realDataDates.has(date)) {
+      var opts = this.resolvedOptions();
+      var noTzOpts = {};
+      for (var k in opts) {
+        if (k !== 'timeZone') noTzOpts[k] = opts[k];
+      }
+      return new _orig_DateTimeFormat(noTzOpts.locale, noTzOpts).format(date);
+    }
+    return _orig_format.call(this, date);
+  };
 }
